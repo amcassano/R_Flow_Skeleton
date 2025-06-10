@@ -1,0 +1,274 @@
+---
+title: "R flow Protocol"
+author: "Ephraim Craddock"
+date: "2025-06-03"
+output: html_document
+---
+
+```{r , include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+R.version
+```
+
+```{r}
+#install.packages(c("usethis", "devtools", "roxygen2", "stringr"))
+library(devtools)
+library(roxygen2)
+library(devtools)
+
+#install.packages("here")
+#here::here()
+```
+
+## Introduction
+
+
+
+## Set Up
+
+-   Set StainForm as either "Well" if using a 96 Well Plate or "FlowTube" if using a flow tube
+
+```{r Set Up(Stain Form)}
+StainForm <- 'Flow tube'    #Well or FlowTube
+
+library(stringr)
+if(stringr::str_equal(StainForm, "well", ignore_case = T)){
+  WashVol <- 200
+  StainVol <- 100
+  FxPVol <- 200
+  Mix <- "Pipette up/down"
+}else if(stringr::str_equal(StainForm, "flowtube", ignore_case = T) | stringr::str_equal(StainForm, "flow tube", ignore_case = T)){
+  WashVol <- 2000
+  StainVol <- 100
+  FxPVol <- 1000
+  Mix <- "Vortex"
+}
+
+cat(
+  'Stain format is', StainForm, '\n',
+  'Wash Volume is' ,WashVol,'μL \n',
+  'Stain Volume is', StainVol,'μL \n',
+  'Mixing Technique is', Mix)
+
+```
+```{r Set Up(Stain Panel)}
+stain_panel <- data.frame(
+  Antibody = c("Cd4", "IFNg", "etc"),
+  Fluorophore = c("Bv6OT", "PE", "PE-Psi7"),
+  Dilution = c(0.01,0.02, 0.3),#MUST be a number
+  Surface = c(T,F,F)
+  
+)
+print(stain_panel)
+
+```
+
+#Now do Count of Cells if you havent already
+```{r set up(Sample Info)}
+sample_info <- data.frame(
+  Name = c("Tol1", "Rej 1", "Dtx 1"),
+  Condition = c("Tol", "Rej", "DTx"),
+  PreStain_Counts = c(10000,12000,90000)
+)
+print(sample_info)
+```
+
+
+## Calculate Optimal Number of Cells to Stain
+- After count, spin down all samples and resuspend at below volumes
+- Assumes an excess of Cells
+
+-   Uses a Concentration of 10M cells/mL OR 1 M cells/100μL
+-   Finding cell volume post resuspension
+```{r Count attempt using a functio}
+StainCalc <- function(count_vol, sample_df = sample_info, final_amount){
+  sample_df$Total_Cells_millions = sample_df$PreStain_Counts * count_vol/1e6 #Count vol is in ml
+  sample_df$ul_Vol_Resuspend = sample_df$PreStain_Counts * count_vol/1e4
+  print(sample_df)
+}
+StainCalc(10, ,g)
+```
+Aliquot 100 ul/sample into well
+
+```{r Original Attempt using resuspension}
+#set volume as variablr
+
+cells.data <- data.frame(
+  Sample = c('Tol1', 'Tol2', 'Tol3', 'etc'),
+  Cells_per_uL = Cell_Conc,
+  Cells_Number = cells.data$Cells_per_uL * 5000, #5ml total cell volume
+  MM_vol_10e8cells_per_mL = cells.data$Cells_Number/1e5, #Maybe remove
+  Beads_Counts = Beads_Conc,
+  Cell_Aliquot_ul = cells.data$Cells_Number/10e5,
+  stringsAsFactors = FALSE
+)
+
+print(cells.data)
+```
+
+```{r original attempt using no resuspension}
+Cell_Conc <- c(11000,12000,11000,11000)
+Beads_Conc <- c(375,375,250,375)
+
+cells.data <- data.frame(
+  Sample = c('Tol1', 'Tol2', 'Tol3', 'etc'),
+  Cells_per_uL = Cell_Conc,
+  Beads_Counts = Beads_Conc,
+  stringsAsFactors = FALSE
+)
+
+  cells.data$Cells_Number <- cells.data$Cells_per_uL * 5000
+cells.data$MM_vol_10e8cells_per_mL <- cells.data$Cells_Number / 1e5
+cells.data$Cells_presuspension_ul <- 1e7 / cells.data$Cells_per_uL
+cells.data$Rest_of_Solution <- 1000 - cells.data$Cells_presuspension_ul
+
+print(cells.data)
+```
+
+## Live Dead
+
+-   Makes 15% excess to be safe
+-   1:1000 dilution (PBS)
+-   Make sure code blocks above have been run
+
+```{r}
+MMX <- nrow(cells.data)*1.25
+cat("Make L/D Master Mix by adding",  MMX, "ul L/D to", MMX*999, "ul 1x PBS.")
+
+LDVol <- MMX
+if (LDVol < 1.5){
+  cat("\n Use 1.5 mL eppi.")
+}else{
+  cat("\n Use 15 mL conical.")
+}
+
+cat("\n Add", StainVol,"ul/ml L/D Master Mix to each", StainForm)
+```
+
+## FC Block
+- Uses FACS buffer as a diluent
+- Incubation time of 20 min
+- Incubation temp of 4C
+
+```{r}
+StockConc <- 9.3 #mg/ml
+FinalConc <- 0.01 #mg/ml ##929 ml add to mix
+MMVol <- MMX*StainVol #In ul
+StockAdd <- MMVol*(FinalConc/StockConc)
+cat("Make FC Block Master Mix by adding", StockAdd, "ul FC Block to", MMVol-StockAdd, "ul FACS Buffer")
+cat("\n Add",StainVol,"ul/ml")
+#######Why is the Stock Add volume so low?
+```
+## FUnction for cell stains
+```{r Function for Cell Stain}
+wait <- 15  #Just asigns these as global variables so they can be modified and then called not in a whole function context
+temp <- 0
+
+stain_mm <- function(panel = stain_panel, RT=T,Surface =T){
+  total <- MMX*StainVol
+  
+ if (RT == T){
+   wait <<- 15
+   temp <<- "Room Temp"
+ }else if(RT==F){
+   wait <<- 60
+   temp <<- "4 C"
+ } #Sets incubation time depening on temp. Default is room temp, otherwise is 4 C
+  
+  vol_add <- c() # Initialize empty vector to store stain volumes
+  vol_false <- c() #Initilaize empty vector to store which rows are false
+  if (Surface == T){
+  # Loop through rows
+  for (i in 1:nrow(panel)){
+    if (panel$Surface[i] == T){
+      vol_add <- append(vol_add,panel$Dilution[i]*total )
+    }else {
+      vol_false <- append(vol_false, i)}}
+  
+  # Add column to the panel
+  panel$Surface_Stain_ul <- vol_add
+  panel <- panel[-vol_false,-which(colnames(panel) == "Surface")]
+  diluent <- total - sum(vol_add)
+  panel <- rbind(panel, c("FACs","N/A", "N/A",diluent))
+  }
+  
+  else if( Surface == F){ #Only Intracellular Stains here
+  # Loop through rows
+  for (i in 1:nrow(panel)){
+    if (panel$Surface[i] == F){
+      vol_add <- append(vol_add, panel$Dilution[i]*total)
+      vol_false <- append(vol_false, i)
+    }else {
+      
+    }}
+  
+  # Add column to the panel
+  panel <- panel[vol_false, -which(colnames(panel) == "Surface")]
+  panel$Intracell_Stain_ul <- vol_add
+  diluent <- total - sum(vol_add)
+  panel <- rbind(panel, c("Perm Buffer","N/A","N/A", diluent))
+  }
+  
+
+  
+  print(panel)
+  
+}
+  
+```
+
+#Surface Stains
+- Incubation time and temp: 1 hr at 4C
+
+```{r}
+stain_mm(stain_panel,T,T)
+```
+
+
+## Perm Buffer
+```{r}
+FPStock <- MMX*StainVol/4
+if (MMX*StainVol<1500){
+  cat("-In a 1.5 mL eppi, ")
+}else{
+  cat("-In a 15 mL conical, ")
+}
+cat("make Fix/Perm  Master Mix by adding", FPStock, "ul Fix/Perm Concentrate to", (StainVol*MMX)-FPStock, "ul Fix/Perm Diluent.")
+
+cat("\n -Add",StainVol,"ul Fix/Perm Master Mix to each", StainForm)
+
+cat("\n -Add",StainVol,"ul Perm Buffer Master Mix to each", StainForm)
+
+cat("\n -Let incubate for",wait,"minutes at", temp)
+
+```
+#Intracellular Stain
+
+```{r Intracellular Stain}
+stain_mm(stain_panel,T,F)
+
+```
+
+
+
+```{r}
+usethis::create_package(".")
+```
+```{r}
+#devtools::document()
+devtools::check()
+
+```
+
+
+
+
+
+
+
+
+
+
+
