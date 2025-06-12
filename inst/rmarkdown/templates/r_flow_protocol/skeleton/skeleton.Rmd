@@ -5,12 +5,23 @@ date: "2025-06-03"
 output: html_document
 ---
 
+## Overview
+
+This R package contains basic code and instructions to aid in streamlining flow cytometry analysis. It is consistenly being updated to include more features and better encompass all protocol needs.
+
+Please run all cells subsequently
+
 ```{r , include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+This package was built in version 4.5.0 You can check your current version by running the cell below. If it’s older than 4.4.0, certain packages (e.g., Rtools) may not work properly.
+
 ```{r}
-R.version
+R.version.string
 ```
+
+Installs and loads packages needed for later. If they are not already installed, removed the \# from infront of the code.
 
 ```{r}
 #install.packages(c("usethis", "devtools", "roxygen2", "stringr"))
@@ -22,13 +33,13 @@ library(devtools)
 #here::here()
 ```
 
-## Introduction
+##Set Up
 
+### Stain Form
 
+-This section lets the user define the staining format. It sets appropriate wash and stain volumes depending on whether wells or tubes are used.
 
-## Set Up
-
--   Set StainForm as either "Well" if using a 96 Well Plate or "FlowTube" if using a flow tube
+Set StainForm as either "Well" if using a 96 Well Plate or "FlowTube" if using a flow tube
 
 ```{r Set Up(Stain Form)}
 StainForm <- 'Flow tube'    #Well or FlowTube
@@ -53,115 +64,159 @@ cat(
   'Mixing Technique is', Mix)
 
 ```
-```{r Set Up(Stain Panel)}
-stain_panel <- data.frame(
-  Antibody = c("Cd4", "IFNg", "etc"),
-  Fluorophore = c("Bv6OT", "PE", "PE-Psi7"),
-  Dilution = c(0.01,0.02, 0.3),#MUST be a number
-  Surface = c(T,F,F)
-  
-)
-print(stain_panel)
 
+### Building Stain Panel
+
+Defines a helper function `define_ab()` to calculate dilution and record antibody info. You must provide two out of three values: stock, final, or dilution. - Have to write function in the form (marker ='', stock = '', final ='') and must include 2/3 of stock, final, dilute - stock and final calculated for record keeping
+
+These define a functions to build panel. DO NOT change these chunks
+
+```{r stain panel builder helper function}
+define_ab <- function(marker, fluor,stock=NA,final=NA,dilute=NA, surface){#xqc do i need to find stock and final, cause we cant find one w/o other
+  
+  if (is.na(dilute)) {
+  if (is.na(final) || is.na(stock)) {
+    stop("dilute or stock & final must have a defined value")
+  } else {
+    dilute <- stock/final}
+  } 
+  
+  if (!is.na(final) && is.na(stock)) {
+  stock <-final*dilute}
+  if (!is.na(stock) && is.na(final)) {
+  final <-stock/dilute}
+
+  
+  return(data.frame(Marker = marker, Fluorophore = fluor, Stock_Conc_mg_mL = stock, Final_Conc_mg_mL = final, Dilution = dilute, Surface_Marker = surface))
+}
 ```
 
-#Now do Count of Cells if you havent already
-```{r set up(Sample Info)}
-sample_info <- data.frame(
-  Name = c("Tol1", "Rej 1", "Dtx 1"),
-  Condition = c("Tol", "Rej", "DTx"),
-  PreStain_Counts = c(10000,12000,90000)
-)
+```{r stain panel builder function}
+build_stain <- function(...){
+  inputs <- list(...)
+  
+  if(!all(sapply(inputs,function(x) is.data.frame(x) && nrow(x) == 1))){
+    stop("Each input should only be one line. One or more inputs is more than one line") #Checks to make sure every input is only one row
+  }
+  
+  return(do.call(rbind,inputs))
+}
+```
+
+Use this chunk to create the full staining panel by manually entering each antibody using the 'define_ab()' function. An example is provided. Feel free to change the values in the example, add lines for antibodies, and/or copy the code into the empty cell below it.
+
+Unlimited antibody markers are allowed. Each 'define_ab' corresponds to a unique antibody. The function must be in the form of (marker ="", fluor = "", etc.) as shown in the example.
+
+Only dilution or both stock and final concentrations are needed. If you have dilutions and wish to provide stock and final concentrations for record keeping, you may do so. Examples of each are shown below.
+
+```{r}
+build_stain(
+  define_ab(marker = "CD4", fluor = 'FITC', stock = 9.3, dilute = .01, surface = T ),
+  define_ab(marker = "IFN-y", fluor = 'PE', dilute = .01, surface = F ),
+  define_ab(marker = "etc", fluor = 'etc', stock = 9.3, final = 1.2, surface =T),
+  define_ab(marker = "etc", fluor = 'etc', stock = 9.3, final = 1.2, dilute = 0.01, surface =T))#xqc allow incorrect dilutions if manually inputted??
+```
+
+#Preparing Cells
+
+##Seting Up Samples Perform a count of cells if you have not done so already. The first chunk is just the function to build the sample data frame. The second chunk is where you will input and change data. Examples are given below.
+
+```{r set up build_samples function}
+build_samples <- function(...){
+  inputs <- list(...)
+  
+  if(!all(sapply(inputs,function(x) is.data.frame(x) && nrow(x) == 1))){
+    stop("Each input should only be one line. One or more inputs is more than one line") #Checks to make sure every input is only one row
+  }
+  
+  return(do.call(rbind,inputs))
+}
+```
+
+```{r inputs for buld samples function}
+
+sample_info <- build_stain(
+  data.frame(Name = "Tol1", Condition = 'Tol', PreStain_Counts = 10000),
+  data.frame(Name = "Tol2", Condition = 'Tol', PreStain_Counts = 11000 ),
+  data.frame(Name = "Rej1", Condition = 'Rej', PreStain_Counts =90000))
 print(sample_info)
 ```
 
-
 ## Calculate Optimal Number of Cells to Stain
-- After count, spin down all samples and resuspend at below volumes
-- Assumes an excess of Cells
 
--   Uses a Concentration of 10M cells/mL OR 1 M cells/100μL
--   Finding cell volume post resuspension
+After you perform the count, spin down all samples and resuspend at the given volumes. This process does assume you have an excess of cells and aims to provide a concentration of 10M cells/ mL or 1M cells/100μL
+
+The function uses a count volume, which is the volume of cells you have pre-suspension, and the samples given, which is defaulted to the table created earlier. Aliquot 100 μL/ sample into wells when ready.
+
 ```{r Count attempt using a functio}
 StainCalc <- function(count_vol, sample_df = sample_info, final_amount){
   sample_df$Total_Cells_millions = sample_df$PreStain_Counts * count_vol/1e6 #Count vol is in ml
   sample_df$ul_Vol_Resuspend = sample_df$PreStain_Counts * count_vol/1e4
   print(sample_df)
 }
-StainCalc(10, ,g)
-```
-Aliquot 100 ul/sample into well
-
-```{r Original Attempt using resuspension}
-#set volume as variablr
-
-cells.data <- data.frame(
-  Sample = c('Tol1', 'Tol2', 'Tol3', 'etc'),
-  Cells_per_uL = Cell_Conc,
-  Cells_Number = cells.data$Cells_per_uL * 5000, #5ml total cell volume
-  MM_vol_10e8cells_per_mL = cells.data$Cells_Number/1e5, #Maybe remove
-  Beads_Counts = Beads_Conc,
-  Cell_Aliquot_ul = cells.data$Cells_Number/10e5,
-  stringsAsFactors = FALSE
-)
-
-print(cells.data)
-```
-
-```{r original attempt using no resuspension}
-Cell_Conc <- c(11000,12000,11000,11000)
-Beads_Conc <- c(375,375,250,375)
-
-cells.data <- data.frame(
-  Sample = c('Tol1', 'Tol2', 'Tol3', 'etc'),
-  Cells_per_uL = Cell_Conc,
-  Beads_Counts = Beads_Conc,
-  stringsAsFactors = FALSE
-)
-
-  cells.data$Cells_Number <- cells.data$Cells_per_uL * 5000
-cells.data$MM_vol_10e8cells_per_mL <- cells.data$Cells_Number / 1e5
-cells.data$Cells_presuspension_ul <- 1e7 / cells.data$Cells_per_uL
-cells.data$Rest_of_Solution <- 1000 - cells.data$Cells_presuspension_ul
-
-print(cells.data)
+StainCalc(10, ,g) #xqc final amount doesn't come inot play
 ```
 
 ## Live Dead
 
--   Makes 15% excess to be safe
--   1:1000 dilution (PBS)
--   Make sure code blocks above have been run
+This is to calculate the Live/Dead staining. It makes a 25% excess to be safe. Specify a dilution, such as 0.001, which is the default if no dilution is provided. Also specify if the incubation is at room tempertaure or not. The function provides a binary option between room temperature and 4 degrees Celsius for the incubation period, with room temperature as the default if no input is provided.
+
+Make sure all above chunks have been run. Below, one chunk is the function and another contains the function to change in order to get desired outputs.
 
 ```{r}
-MMX <- nrow(cells.data)*1.25
-cat("Make L/D Master Mix by adding",  MMX, "ul L/D to", MMX*999, "ul 1x PBS.")
+Live_Dead <- function(dilution = .001, RT=T){#Possibly need to calculate dilution based on stain rather than vice versa
+  inc_time <- 0 
+  inc_temp <- ""
+  if (RT == T){
+   inc_time <- 15
+   inc_temp <- "Room Temp"
+ }else if(RT==F){
+   inc_time <- 60
+   inc_temp <- "4 C"
+ }
+  
+MMX <- nrow(cells.data)*1.25 
+ld_total <- MMX*StainVol
+ld_add <- ld_total*dilution
 
-LDVol <- MMX
-if (LDVol < 1.5){
+cat("Make L/D Master Mix by adding", ld_add , "ul L/D to", ld_total-ld_add, "ul 1x PBS.")
+
+if (ld_total < 1500){
   cat("\n Use 1.5 mL eppi.")
 }else{
   cat("\n Use 15 mL conical.")
 }
 
 cat("\n Add", StainVol,"ul/ml L/D Master Mix to each", StainForm)
+cat("\n Incubate at", inc_temp, "for", inc_time, "minutes" )}
+```
+
+```{r}
+Live_Dead(dilution = 0.001, RT = T)
 ```
 
 ## FC Block
-- Uses FACS buffer as a diluent
-- Incubation time of 20 min
-- Incubation temp of 4C
+
+-   Uses FACS buffer as a diluent
+-   Incubation time of 20 min
+-   Incubation temp of 4C
+
+This aids in making the FC Block Master Mix. Put in the current stock concentration and final concentration. Again, it makes a 25% excess. Use FACS buffer as a diluent to the FC Block. Then, when done, let it incubate at 4 degrees Celsius for 20 minutes.
 
 ```{r}
 StockConc <- 9.3 #mg/ml
 FinalConc <- 0.01 #mg/ml ##929 ml add to mix
 MMVol <- MMX*StainVol #In ul
 StockAdd <- MMVol*(FinalConc/StockConc)
-cat("Make FC Block Master Mix by adding", StockAdd, "ul FC Block to", MMVol-StockAdd, "ul FACS Buffer")
-cat("\n Add",StainVol,"ul/ml")
+cat("Make FC Block Master Mix by adding", round(StockAdd, digits=3), "ul FC Block to", round(MMVol-StockAdd, digits = 3), "ul FACS Buffer")
+cat("\n Add",StainVol,"ul/ml to each sample")
 #######Why is the Stock Add volume so low?
 ```
-## FUnction for cell stains
+
+## Function for cell stains
+
+Creates a table to aid in surface staining. It will only display the antibodies that are for surface staining. The first chunk initializes the function and the second chunks runs the function.
+
 ```{r Function for Cell Stain}
 wait <- 15  #Just asigns these as global variables so they can be modified and then called not in a whole function context
 temp <- 0
@@ -219,15 +274,16 @@ stain_mm <- function(panel = stain_panel, RT=T,Surface =T){
   
 ```
 
-#Surface Stains
-- Incubation time and temp: 1 hr at 4C
+#xqc Surface Stains - Incubation time and temp: 1 hr at 4C
 
 ```{r}
 stain_mm(stain_panel,T,T)
 ```
 
-
 ## Perm Buffer
+
+Once you are finished surface staining, add the Perm Buffer to permalize the cells for intracellular staining. This relies on the input of room temperature or not room temperature in the function above.
+
 ```{r}
 FPStock <- MMX*StainVol/4
 if (MMX*StainVol<1500){
@@ -244,31 +300,22 @@ cat("\n -Add",StainVol,"ul Perm Buffer Master Mix to each", StainForm)
 cat("\n -Let incubate for",wait,"minutes at", temp)
 
 ```
-#Intracellular Stain
+
+## Intracellular Stain
+
+This chunk uses a function defined earlier, but now surface staining is false. This example is still at room temperature. Just like in surface staining, it only displays the antibodies that are for intracellular staining.
 
 ```{r Intracellular Stain}
 stain_mm(stain_panel,T,F)
 
 ```
 
-
-
 ```{r}
 usethis::create_package(".")
 ```
+
 ```{r}
 #devtools::document()
 devtools::check()
 
 ```
-
-
-
-
-
-
-
-
-
-
-
