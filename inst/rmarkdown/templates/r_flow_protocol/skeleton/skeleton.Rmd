@@ -217,9 +217,12 @@ Live_Dead <- function(dilution = .001, RT=T){#Possibly need to calculate dilutio
    inc_time <- 60
    inc_temp <- "4 C"
  }
-  
+#this doesnt work because there is no cells.data object
+#using a new MMX so i can continue to test things
+MMX <- 5
 MMX <- nrow(cells.data)*1.25 
 ld_total <- MMX*StainVol
+#dilution is not found
 ld_add <- ld_total*dilution
 
 cat("Make L/D Master Mix by adding", ld_add , "ul L/D to", ld_total-ld_add, "ul 1x PBS.")
@@ -234,7 +237,7 @@ cat("\n Add", StainVol,"ul/ml L/D Master Mix to each", StainForm)
 cat("\n Incubate at", inc_temp, "for", inc_time, "minutes" )}
 ```
 
-*note from lexi: this function doesn't work, fix and test it*
+*note from lexi: this function doesn't work, fix and test it, i think the issue is that half the code above is not in the function (in addition to the MMX not working)*
 
 ```{r}
 Live_Dead(dilution = 0.001, RT = T)
@@ -256,11 +259,11 @@ Then, when done, let it incubate at 4 degrees Celsius for 20 minutes.
 StockConc <- 9.3 #mg/ml
 FinalConc <- 0.01 #mg/ml ##929 ml add to mix
 MMVol <- MMX*StainVol #In ul
-# MMX isn't defined because its above in the live dead formula which couldnt run, define it elsewhere or calculate it again
 StockAdd <- MMVol*(FinalConc/StockConc)
 cat("Make FC Block Master Mix by adding", round(StockAdd, digits=3), "ul FC Block to", round(MMVol-StockAdd, digits = 3), "ul FACS Buffer")
 cat("\n Add",StainVol,"ul/ml to each sample")
 #######Why is the Stock Add volume so low?
+# this is correct, we use very little FC block! it ends up being roughly 1:1000
 ```
 
 ## Function for cell stains
@@ -329,7 +332,8 @@ stain_mm <- function(panel = stain_panel, RT=T,Surface =T){
 #xqc Surface Stains - Incubation time and temp: 1 hr at 4C
 
 ```{r}
-stain_mm(stain_panel,T,T)
+stain_mm(standard_sort_panel) #this throws an error "Error in -vol_false : invalid argument to unary operator"
+# put in test cases for all your functions to test them, use edge cases and test with and without all optional/pre-defined parameters, and with true and false
 ```
 
 ## Perm Buffer
@@ -354,6 +358,8 @@ cat("\n -Let incubate for",wait,"minutes at", temp)
 
 ```
 
+*Note from lexi: fix this so you incubate the fix/perm for 1hr at 4deg. wash with wash vol of perm buffer*
+
 ## Intracellular Stain
 
 This chunk uses a function defined earlier, but now surface staining is false.
@@ -361,9 +367,11 @@ This example is still at room temperature.
 Just like in surface staining, it only displays the antibodies that are for intracellular staining.
 
 ```{r Intracellular Stain}
-stain_mm(stain_panel,T,F)
+stain_mm(standard_sort_panel,T,F)
 
 ```
+
+*note from lexi: whats this below?*
 
 ```{r}
 usethis::create_package(".")
